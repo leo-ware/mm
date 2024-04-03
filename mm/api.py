@@ -1,8 +1,13 @@
 from abc import ABC, abstractmethod
+from functools import reduce
 
 class Math(ABC):
     @abstractmethod
     def _latex(self):
+        raise NotImplementedError()
+    
+    @abstractmethod
+    def __repr__(self):
         raise NotImplementedError()
 
     def latex(self):
@@ -21,7 +26,7 @@ class Math(ABC):
             raise ModuleNotFoundError("Need optional dependency IPython to display math widget, consider using the latex() method instead if you are in a non-interactive environment")
         return Math(self.latex())
 
-class Effect(Math):
+class Effect(Math, ABC):
     def __add__(self, other):
         assert isinstance(other, Effect) or (other in [0, 1]) or isinstance(other, Variable)
         if other == 1:
@@ -52,12 +57,25 @@ class Effect(Math):
     
     def __ror__(self, other):
         return CompoundEffect([other]).ref(self)
+    
+    @property
+    @abstractmethod
+    def vars(self):
+        raise NotImplementedError()
+    
+    @abstractmethod
+    def __hash__(self):
+        raise NotImplementedError()
+    
+    @abstractmethod
+    def __eq__(self, other):
+        raise NotImplementedError()
 
 class CompoundEffect(Effect):
     def __init__(self, effects):
-        self.fixed_effects = []
-        self.random_effects = []
-        self.intercept = False
+        fixed_effects = []
+        random_effects = []
+        intercept = False
 
         effects = list(effects)
         while effects:
@@ -65,22 +83,58 @@ class CompoundEffect(Effect):
             if isinstance(effect, CompoundEffect):
                 effects.extend(effect.effects)
             elif isinstance(effect, Fixed):
-                self.fixed_effects.append(effect)
+                fixed_effects.append(effect)
             elif isinstance(effect, Random):
-                self.random_effects.append(effect)
+                random_effects.append(effect)
             elif effect == 1 or isinstance(effect, Intercept):
-                self.intercept = True
+                intercept = True
             elif effect == 0:
                 continue
             else:
                 raise TypeError(f"Expected effect to be an Effect, got {type(effect)}")
         
-        self.fixed_effects = tuple(sorted(self.fixed_effects))
-        self.random_effects = tuple(sorted(self.random_effects))
+        self._fixed_effects = frozenset(fixed_effects)
+        self._random_effects = frozenset(random_effects)
+        self._intercept = intercept
+    
+    @property
+    def fixed_effects(self):
+        return self._fixed_effects
+    
+    @property
+    def random_effects(self):
+        return self._random_effects
+    
+    @property
+    def intercept(self):
+        return self._intercept
     
     @property
     def effects(self):
-        return ((Intercept(),) * self.intercept) + self.fixed_effects + self.random_effects
+        return frozenset((Intercept(),) * self.intercept) | self.fixed_effects | self.random_effects
+    
+    @property
+    def vars(self):
+        return reduce(lambda x, y: x | y, (effect.vars for effect in self.effects))
+    
+    def __repr__(self):
+        return f"CompoundEffect({list(self.effects)})"
+    
+    def __eq__(self, other):
+        return isinstance(other, CompoundEffect) and self.effects == other.effects
+    
+    def __hash__(self, other):
+        return hash(self.effects)
+    
+    def __contains__(self, other):
+        if other == 1:
+            other = Intercept()
+        
+        if isinstance(other, Effect):
+            return other in self.effects
+        elif isinstance(other, Variable):
+            return other in self.vars
+        return False
     
     def ref(self, other):
         assert len(self.effects) <= 2
@@ -95,9 +149,6 @@ class CompoundEffect(Effect):
             else:
                 raise TypeError(f"RandomEffect must have only Fixed and Intercept on left hand side, got {type(e)}")
         return Random(group=varify(other), slope=s, intercept=not not i)
-    
-    def __repr__(self):
-        return f"CompoundEffect({list(self.effects)})"
 
     def _latex(self):
         f_count = 0
@@ -124,15 +175,39 @@ class Intercept(Effect):
     def __init__(self):
         pass
     
+    def __eq__(self, other):
+        return isinstance(other, Intercept)
+    
     def _latex(self):
         return "\\beta_0"
     
     def __repr__(self):
         return "Intercept()"
+    
+    def __hash__(self):
+        return hash("Intercept")
+    
+    @property
+    def vars(self):
+        return frozenset()
 
 class Fixed(Effect):
     def __init__(self, name):
-        self.name = varify(name)
+        self._name = varify(name)
+    
+    @property
+    def name(self):
+        return self._name
+    
+    @property
+    def vars(self):
+        return frozenset((self.name,))
+    
+    def __eq__(self, other):
+        return isinstance(other, Fixed) and self.name == other.name
+    
+    def __hash__(self):
+        return hash(str(self))
     
     def __lt__(self, other):
         assert isinstance(other, Fixed)
@@ -147,12 +222,39 @@ class Fixed(Effect):
 class Random(Effect):
     def __init__(self, group, slope, intercept=True):
         assert isinstance(intercept, bool)
-        self.group = varify(group)
+        self._group = varify(group)
         if slope is not None:
-            self.slope = varify(slope)
+            self._slope = varify(slope)
         else:
-            self.slope = None
-        self.intercept = intercept
+            self._slope = None
+        self._intercept = intercept
+    
+    @property
+    def vars(self):
+        return frozenset((self.group, self.slope))
+    
+    @property
+    def group(self):
+        return self._group
+    
+    @property
+    def slope(self):
+        return self._slope
+    
+    @property
+    def intercept(self):
+        return self._intercept
+    
+    def __eq__(self, other):
+        return (
+            isinstance(other, Random) and
+            self.group == other.group and
+            self.slope == other.slope and
+            self.intercept == other.intercept
+        )
+    
+    def __hash__(self):
+        return hash((self.group, self.slope, self.intercept))
     
     def __lt__(self, other):
         assert isinstance(other, Random)
@@ -178,7 +280,17 @@ class Random(Effect):
 
 class Variable:
     def __init__(self, name):
-        self.name = name
+        self._name = name
+    
+    @property
+    def name(self):
+        return self._name
+    
+    def __eq__(self, other):
+        return isinstance(other, Variable) and self.name == other.name
+    
+    def __hash__(self):
+        return hash(str(self))
 
     def _latex(self):
         return "\\text{" + self.name + "}"
@@ -199,7 +311,7 @@ class Variable:
         return other | Fixed(self)
 
     def hat(self):
-        return Outcome(self)
+        return _Outcome(self)
 
 def varify(name):
     """Takes a string or Variable and returns a Variable"""
@@ -213,7 +325,7 @@ def make_vars(names):
     """Takes a iterable of variable names and returns a list of Variables"""
     return [varify(name) for name in names]
 
-class Outcome(Math):
+class _Outcome(Math):
     def __init__(self, var):
         self.var = varify(var)
 
@@ -223,24 +335,55 @@ class Outcome(Math):
     def __eq__(self, other):
         assert isinstance(other, Effect)
         return Model(self, other)
+    
+    def __hash__(self):
+        raise TypeError("Outcome is not hashable")
+    
+    def __repr__(self):
+        return f"Outcome({self.var})"
 
 class Model(Math):
     """Represents a mixed model
-    
+
     Attributes:
         outcome: Variable
         effect: Effect
     """
     def __init__(self, outcome, effect):
-        if isinstance(outcome, Outcome):
+        if isinstance(outcome, _Outcome):
             outcome = outcome.var
         assert isinstance(outcome, Variable)
         assert isinstance(effect, Effect)
-        self.outcome = outcome
-        self.effect = CompoundEffect([effect])
+        self._outcome = outcome
+        self._effect = CompoundEffect([effect])
+    
+    @property
+    def outcome(self):
+        return self._outcome
+    
+    @property
+    def effect(self):
+        return self._effect
+    
+    @property
+    def vars(self):
+        return self.effect.vars | {self.outcome}
+    
+    def __eq__(self, other):
+        return (
+            isinstance(other, Model) and
+            self.outcome == other.outcome and
+            self.effect == other.effect
+        )
+    
+    def __hash__(self):
+        return hash((self.outcome, self.effect))
     
     def __repr__(self):
         return f"Model({self.outcome}, {self.effect})"
+    
+    def __contains__(self, other):
+        return other == self.outcome or other in self.effect
 
     def _latex(self):
         el = self.effect._latex()
