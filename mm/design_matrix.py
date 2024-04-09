@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 
 from mm.infix_api import ModelEquation
 from mm.covariance import Covariance, cv_lookup, UniformVariance
+from mm.exceptions import DataTypeWarning
 
 class SingleEffectDesignMatrix(ABC):
     def _get_covariance_matrix(self, dim, cv) -> Covariance:
@@ -43,8 +44,11 @@ class REDM(SingleEffectDesignMatrix):
     def __init__(self, data, intercept = True, slope_data=None, covariance=None):
         self.has_intercept = bool(intercept)
         self.has_slope = slope_data is not None
+
         if not self.has_intercept and not self.has_slope:
             raise ValueError("random effect requires at least one of intercept and slope")
+        if torch.is_floating_point(torch.tensor(data)):
+            raise DataTypeWarning("Random effect received float, this is unadvisable")
         
         random_df = pd.get_dummies(self._make_tensor(data, column=True).reshape(-1), dtype=float)
         if self.has_slope:

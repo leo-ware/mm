@@ -3,3 +3,6 @@ class UninitializedError(Exception):
 
 class LinAlgError(Exception):
     pass
+
+class DataTypeWarning(Warning):
+    pass
