@@ -1,6 +1,6 @@
 import torch
 from dataclasses import dataclass
-from typing import Dict, List, Union, Any
+from typing import Dict, List, Union, Any, Callable
 from tqdm import tqdm
 
 @dataclass
@@ -10,7 +10,13 @@ class OptimizationResult:
     optim_params: Union[Dict[str, Any], None] = None
     optimizer: Union[torch.optim.Optimizer, None] = None
 
-def adam(params, loss_fn, max_epochs=1000, verbose=True, lr=0.01):
+def parse_optimizer_param(optimizer):
+    if optimizer == 'adam':
+        return adam
+    else:
+        raise ValueError("Unknown optimizer")
+
+def adam(params: List[torch.Tensor], loss_fn: Callable[[], torch.Tensor], max_epochs=1000, verbose=True, lr=0.01):
     optimizer = torch.optim.Adam(params, lr=lr)
 
     for epoch in tqdm(range(max_epochs), disable=not verbose):

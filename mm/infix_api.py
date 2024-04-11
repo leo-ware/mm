@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from functools import reduce
-from typing import List, Union
+from typing import List, Union, Tuple
 
 # TODO: in lme4 intercept is assumed unless you have a 0 or -1, probably should do this
 # TODO: in lme4, the || operator is used to separate random effects, e.g. uncorrelated slope and intercept
@@ -16,7 +16,7 @@ class Math(ABC):
     def __repr__(self):
         raise NotImplementedError()
 
-    def latex(self):
+    def latex(self) -> Union[str, Tuple[str]]:
         l = self._latex()
         if isinstance(l, str):
             return f"${self._latex()}$"
@@ -66,6 +66,14 @@ class Variable:
 
     def hat(self) -> "_Outcome":
         return _Outcome(self)
+    
+    def dist(self, other):
+        if isinstance(other, Effect):
+            return self.hat() == other
+        elif isinstance(other, Variable):
+            return self.hat() == FixedEffect(other)
+        else:
+            return self.hat() == CompoundEffect(other)
 
 def varify(name):
     """Takes a string or Variable and returns a Variable"""
@@ -213,7 +221,10 @@ class RandomEffect(Effect):
     
     @property
     def vars(self) -> frozenset[Variable]:
-        return frozenset((self.group, self.slope))
+        s = {self.group}
+        if self.slope:
+            s.add(self.slope)
+        return frozenset(s)
     
     @property
     def group(self) -> Variable:
