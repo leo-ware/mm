@@ -1,5 +1,10 @@
 **/__pycache__/
 .pytest_cache
+.mypy_cache
+.DS_Store
+
 venv
 .venv
+
 foo.ipynb
+papers/lmer\ 2.pdf
